@@ -94,6 +94,23 @@ func (o *organizationPlugin) CreateInvitation(ctx context.Context, user *limen.U
 	return invitation, nil
 }
 
+// GetInvitationByID reads one invitation without filtering its status or expiration.
+// The organization scope and invitation:read permission are always checked.
+// Limen resolves public identifiers through its normal schema-aware database API.
+func (o *organizationPlugin) GetInvitationByID(ctx context.Context, user *limen.User, organization *Organization, invitationID any) (*Invitation, error) {
+	if err := o.HasPermission(ctx, user, organization.ID, perms("invitation:read")); err != nil {
+		return nil, err
+	}
+	model, err := o.core.FindOne(ctx, o.invitationSchema, []limen.Where{
+		limen.Eq(o.invitationSchema.GetOrganizationIDField(), organization.ID),
+		limen.Eq(o.invitationSchema.GetIDField(), invitationID),
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return model.(*Invitation), nil
+}
+
 func (o *organizationPlugin) FindPendingInvitation(ctx context.Context, options *FindPendingInvitationOptions) (*Invitation, error) {
 	conditions := []limen.Where{limen.Eq(o.invitationSchema.GetStatusField(), InvitationStatusPending),
 		limen.IsNull(o.invitationSchema.GetExpiresAtField()),

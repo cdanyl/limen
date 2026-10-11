@@ -42,6 +42,8 @@ type API interface {
 	ApiKeyPrincipal() *ApiKeyPrincipal
 
 	CreateInvitation(ctx context.Context, user *limen.User, organization *Organization, req *CreateInvitationRequest) (*Invitation, error)
+	// GetInvitationByID reads one invitation in the authorized organization, including terminal states.
+	GetInvitationByID(ctx context.Context, user *limen.User, organization *Organization, invitationID any) (*Invitation, error)
 	FindPendingInvitation(ctx context.Context, options *FindPendingInvitationOptions) (*Invitation, error)
 	GetInvitationByToken(ctx context.Context, user *limen.User, invitationToken string) (*Invitation, error)
 	RespondToInvitation(ctx context.Context, user *limen.User, invitationToken string, response InvitationResponse) (*Invitation, error)
