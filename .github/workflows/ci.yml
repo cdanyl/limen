@@ -54,3 +54,33 @@ jobs:
 
       - name: Run linter
         run: golangci-lint run ./...
+
+  postgres:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: limen
+          POSTGRES_PASSWORD: limen
+          POSTGRES_DB: limen_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U limen -d limen_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LIMEN_POSTGRES_TEST_DSN: postgres://limen:limen@localhost:5432/limen_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+      - name: Use checkout modules
+        run: go work init . ./cmd/limen ./adapters/sql ./adapters/gorm ./plugins/organization
+      - name: Check generated schemas and organization APIs on PostgreSQL
+        working-directory: cmd/limen
+        run: go test -race -tags=postgres -run '^TestPostgres' -count=1 -timeout=3m .

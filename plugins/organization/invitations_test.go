@@ -270,3 +270,26 @@ func TestCreateInvitation_ExistingPending(t *testing.T) {
 		})
 	}
 }
+
+func TestGetInvitationByID_AuthorizationAndTerminalState(t *testing.T) {
+	t.Parallel()
+	l, api := newTestOrgPlugin(t)
+	owner, org, _ := seedOwnerOrg(t, l, api, "exact-owner@test.com", "Exact", "exact")
+	foreign, other, _ := seedOwnerOrg(t, l, api, "exact-foreign@test.com", "Other", "other-exact")
+	invitee := seedUser(t, l, "exact-invitee@test.com")
+	invitation, err := api.CreateInvitation(t.Context(), owner, org, &CreateInvitationRequest{Email: invitee.Email, Role: roleNameMember})
+	require.NoError(t, err)
+	_, err = api.CancelPendingInvitation(t.Context(), owner, org, invitation.ID)
+	require.NoError(t, err)
+	found, err := api.GetInvitationByID(t.Context(), owner, org, invitation.ID)
+	require.NoError(t, err)
+	require.Equal(t, InvitationStatusCanceled, found.Status)
+	_, err = api.GetInvitationByID(t.Context(), foreign, other, invitation.ID)
+	require.ErrorIs(t, err, limen.ErrRecordNotFound)
+	_, err = api.GetInvitationByID(t.Context(), foreign, org, invitation.ID)
+	require.ErrorIs(t, err, ErrMemberNotInOrganization)
+	_, err = api.GetInvitationByID(t.Context(), nil, org, invitation.ID)
+	require.ErrorIs(t, err, limen.ErrUnauthorized)
+	_, err = api.GetInvitationByID(t.Context(), owner, nil, invitation.ID)
+	require.ErrorIs(t, err, limen.ErrRecordNotFound)
+}

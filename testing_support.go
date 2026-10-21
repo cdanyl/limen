@@ -209,6 +209,10 @@ func (a *testMemoryAdapter) Count(_ context.Context, tableName SchemaTableName, 
 // testDerefPointer flattens pointer values produced by ToStorage so the
 // in-memory adapter behaves like a database driver.
 func testDerefPointer(v any) any {
+	// database/sql stores named string values as their underlying string.
+	if value := reflect.ValueOf(v); value.Kind() == reflect.String {
+		return value.String()
+	}
 	switch p := v.(type) {
 	case *string:
 		return testDereference(p)

@@ -98,6 +98,12 @@ func (o *organizationPlugin) CreateInvitation(ctx context.Context, user *limen.U
 // The organization scope and invitation:read permission are always checked.
 // Limen resolves public identifiers through its normal schema-aware database API.
 func (o *organizationPlugin) GetInvitationByID(ctx context.Context, user *limen.User, organization *Organization, invitationID any) (*Invitation, error) {
+	if user == nil {
+		return nil, limen.ErrUnauthorized
+	}
+	if organization == nil {
+		return nil, limen.ErrRecordNotFound
+	}
 	if err := o.HasPermission(ctx, user, organization.ID, perms("invitation:read")); err != nil {
 		return nil, err
 	}
