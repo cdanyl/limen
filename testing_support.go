@@ -209,6 +209,10 @@ func (a *testMemoryAdapter) Count(_ context.Context, tableName SchemaTableName, 
 // testDerefPointer flattens pointer values produced by ToStorage so the
 // in-memory adapter behaves like a database driver.
 func testDerefPointer(v any) any {
+	// database/sql stores named string values as their underlying string.
+	if value := reflect.ValueOf(v); value.Kind() == reflect.String {
+		return value.String()
+	}
 	switch p := v.(type) {
 	case *string:
 		return testDereference(p)
@@ -532,4 +536,21 @@ func SeedTestSessionRecord(t *testing.T, l *Limen, userID any, email string) *Se
 	}
 	t.Fatalf("SeedTestSessionRecord: session for token %q not found", result.Token)
 	return nil
+}
+
+func (a *testMemoryAdapter) relatedConditions(conditions []Where, related RelatedQuery, column string) []Where {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	rows := testFilterRows(a.table(related.Table).rows, related.Conditions)
+	keys := make([]any, len(rows))
+	for i, row := range rows {
+		keys[i] = row[related.Column]
+	}
+	return append(append([]Where(nil), conditions...), In(column, keys))
+}
+func (a *testMemoryAdapter) FindRelated(ctx context.Context, table SchemaTableName, column string, conditions []Where, related RelatedQuery, opts *QueryOptions) ([]map[string]any, error) {
+	return a.FindMany(ctx, table, a.relatedConditions(conditions, related, column), opts)
+}
+func (a *testMemoryAdapter) CountRelated(ctx context.Context, table SchemaTableName, column string, conditions []Where, related RelatedQuery) (int64, error) {
+	return a.Count(ctx, table, a.relatedConditions(conditions, related, column))
 }

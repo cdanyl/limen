@@ -7,7 +7,12 @@ require (
 	github.com/iancoleman/strcase v0.3.0
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/thecodearcher/limen v0.2.3
+	github.com/thecodearcher/limen/adapters/gorm v0.2.1
+	github.com/thecodearcher/limen/adapters/sql v0.2.1
+	github.com/thecodearcher/limen/plugins/organization v0.1.1
 	github.com/urfave/cli/v3 v3.6.1
+	gorm.io/driver/postgres v1.6.0
+	gorm.io/gorm v1.30.1
 )
 
 require (
@@ -15,6 +20,9 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/jmoiron/sqlx v1.4.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

@@ -550,3 +550,44 @@ func (o *organizationPlugin) deleteMember(ctx context.Context, organization *Org
 		})
 	})
 }
+
+// ListAccountMemberships reads the account's own organizations. It grants no
+// access to other members and never changes the session's active organization.
+func (o *organizationPlugin) ListAccountMemberships(ctx context.Context, user *limen.User, filter *ListOrganizationsFilter, opts *limen.QueryOptions) (*limen.Page[*Member], error) {
+	organizations, err := o.ListOrganizations(ctx, user, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	result := &limen.Page[*Member]{Items: []*Member{}, Total: organizations.Total, Page: organizations.Page, PerPage: organizations.PerPage, TotalPages: organizations.TotalPages}
+	if len(organizations.Items) == 0 {
+		return result, nil
+	}
+	ids := make([]any, len(organizations.Items))
+	for i, org := range organizations.Items {
+		ids[i] = org.ID
+	}
+	rows, err := o.core.FindMany(ctx, o.memberSchema, []limen.Where{
+		limen.Eq(o.memberSchema.GetUserIDField(), user.ID), limen.In(o.memberSchema.GetOrganizationIDField(), ids),
+	})
+	if err != nil {
+		return nil, err
+	}
+	members := limen.MapToSliceOfType[*Member](rows)
+	if err := o.attachMemberRoles(ctx, members); err != nil {
+		return nil, err
+	}
+	byOrganization := make(map[any]*Member, len(members))
+	for _, member := range members {
+		byOrganization[member.OrganizationID] = member
+	}
+	for _, org := range organizations.Items {
+		member, ok := byOrganization[org.ID]
+		if !ok {
+			return nil, ErrMemberNotInOrganization
+		}
+		member.Organization = org
+		member.User = user
+		result.Items = append(result.Items, member)
+	}
+	return result, nil
+}

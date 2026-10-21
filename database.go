@@ -262,3 +262,27 @@ func (w Where) Or() Where {
 	w.Connector = ConnectorOr
 	return w
 }
+
+// RelatedQuery restricts a query to keys selected from a related table. It carries
+// table/column identifiers and bound conditions, never an executable SQL fragment.
+type RelatedQuery struct {
+	Table      SchemaTableName
+	Column     string
+	Conditions []Where
+}
+
+// RelatedDatabaseAdapter supports server-side semijoins for bounded pagination.
+// A core operation requiring this capability returns an error on other adapters;
+// it never loads the whole relation or silently omits the membership condition.
+type RelatedDatabaseAdapter interface {
+	FindRelated(context.Context, SchemaTableName, string, []Where, RelatedQuery, *QueryOptions) ([]map[string]any, error)
+	CountRelated(context.Context, SchemaTableName, string, []Where, RelatedQuery) (int64, error)
+}
+
+// RelatedRecords names the related schema and its foreign-key field. The core
+// applies its public-ID rewriting and soft-delete rules before reaching an adapter.
+type RelatedRecords struct {
+	Schema     Schema
+	Field      string
+	Conditions []Where
+}

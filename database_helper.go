@@ -463,3 +463,73 @@ func newPage[T any](items []T, total int64, opts *QueryOptions) *Page[T] {
 		TotalPages: int((total + int64(perPage) - 1) / int64(perPage)),
 	}
 }
+
+// FindRelatedWithOptions pages records whose primary key occurs in the related
+// records. Count and page use the same filters; related rows are not materialized.
+func (core *LimenCore) FindRelatedWithOptions(ctx context.Context, schema Schema, conditions []Where, related RelatedRecords, opts *QueryOptions) (*Page[Model], error) {
+	adapter, ok := core.getDB(ctx).(RelatedDatabaseAdapter)
+	if !ok {
+		return nil, fmt.Errorf("database adapter does not support related queries")
+	}
+	if related.Schema == nil || related.Field == "" {
+		return nil, fmt.Errorf("related schema and field are required")
+	}
+	conditions, err := core.rewritePublicIDConditions(schema, conditions)
+	if err != nil {
+		return nil, err
+	}
+	relationConditions, err := core.rewritePublicIDConditions(related.Schema, related.Conditions)
+	if err != nil {
+		return nil, err
+	}
+	conditions = applySoftDeleteFilter(schema, conditions)
+	relation := RelatedQuery{Table: related.Schema.GetTableName(), Column: related.Field, Conditions: applySoftDeleteFilter(related.Schema, relationConditions)}
+	options, err := relatedPageOptions(schema, opts)
+	if err != nil {
+		return nil, err
+	}
+	total, err := adapter.CountRelated(ctx, schema.GetTableName(), schema.GetIDField(), conditions, relation)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := adapter.FindRelated(ctx, schema.GetTableName(), schema.GetIDField(), conditions, relation, options)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Model, len(rows))
+	for i, row := range rows {
+		result[i] = schema.FromStorage(row)
+	}
+	return newPage(result, total, options), nil
+}
+
+func relatedPageOptions(schema Schema, opts *QueryOptions) (*QueryOptions, error) {
+	options := QueryOptions{Limit: DefaultPerPage}
+	if opts != nil {
+		options = *opts
+		options.OrderBy = append([]OrderBy(nil), opts.OrderBy...)
+	}
+	if options.Limit <= 0 {
+		options.Limit = DefaultPerPage
+	}
+	if options.Limit > MaxPerPage || options.Offset < 0 {
+		return nil, fmt.Errorf("invalid related page bounds")
+	}
+	if len(options.OrderBy) == 0 {
+		field := schema.GetField(SchemaCreatedAtField)
+		if field == "" {
+			return nil, fmt.Errorf("no order by column found, use QueryOptions.OrderBy to specify one")
+		}
+		options.OrderBy = []OrderBy{{Column: field, Direction: OrderByDesc}}
+	}
+	hasID := false
+	for _, order := range options.OrderBy {
+		if order.Column == schema.GetIDField() {
+			hasID = true
+		}
+	}
+	if !hasID {
+		options.OrderBy = append(options.OrderBy, OrderBy{Column: schema.GetIDField(), Direction: OrderByDesc})
+	}
+	return &options, nil
+}

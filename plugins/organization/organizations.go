@@ -115,33 +115,21 @@ func (o *organizationPlugin) hasUserReachedMaxOrganizations(ctx context.Context,
 }
 
 func (o *organizationPlugin) ListOrganizations(ctx context.Context, user *limen.User, filter *ListOrganizationsFilter, opts *limen.QueryOptions) (*limen.Page[*Organization], error) {
-	memberships, err := o.core.FindMany(ctx, o.memberSchema, []limen.Where{
-		limen.Eq(o.memberSchema.GetUserIDField(), user.ID),
-	})
+	if user == nil {
+		return nil, limen.ErrUnauthorized
+	}
 
+	conditions := []limen.Where{}
+	if filter != nil && filter.Name != nil {
+		conditions = append(conditions, limen.Contains(o.organizationSchema.GetNameField(), *filter.Name))
+	}
+	page, err := o.core.FindRelatedWithOptions(ctx, o.organizationSchema, conditions, limen.RelatedRecords{
+		Schema: o.memberSchema, Field: o.memberSchema.GetOrganizationIDField(), Conditions: []limen.Where{limen.Eq(o.memberSchema.GetUserIDField(), user.ID)},
+	}, opts)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(memberships) == 0 {
-		return limen.EmptyPage[*Organization](opts), nil
-	}
-
-	orgIds := make([]any, len(memberships))
-	for i, membership := range memberships {
-		orgIds[i] = membership.(*Member).OrganizationID
-	}
-
-	conditions := []limen.Where{
-		limen.In(o.organizationSchema.GetIDField(), orgIds),
-	}
-
-	if filter.Name != nil {
-		conditions = append(conditions, limen.Contains(o.organizationSchema.GetNameField(), *filter.Name))
-	}
-
-	organizations, err := o.core.FindWithOptions(ctx, o.organizationSchema, conditions, opts)
-	return limen.MapPage[*Organization](organizations), err
+	return limen.MapPage[*Organization](page), nil
 }
 
 func (o *organizationPlugin) UpdateOrganization(ctx context.Context, user *limen.User, organizationID any, request *UpdateOrganizationRequest) (*Organization, error) {

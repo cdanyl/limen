@@ -2,6 +2,7 @@ package limen
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -572,4 +573,46 @@ func TestDatabaseHelper_CreateAndReturn(t *testing.T) {
 	updatedAt, ok := raw[userSchema.GetField(SchemaUpdatedAtField)].(time.Time)
 	require.True(t, ok, "updated_at should be set on the returned model")
 	assert.False(t, updatedAt.IsZero())
+}
+
+// The spy observes adapter calls, not the number of rows it returns.
+type relatedCountingAdapter struct {
+	DatabaseAdapter
+	RelatedDatabaseAdapter
+	counts int
+	pages  int
+}
+
+func (a *relatedCountingAdapter) CountRelated(ctx context.Context, table SchemaTableName, column string, where []Where, related RelatedQuery) (int64, error) {
+	a.counts++
+	return a.RelatedDatabaseAdapter.CountRelated(ctx, table, column, where, related)
+}
+func (a *relatedCountingAdapter) FindRelated(ctx context.Context, table SchemaTableName, column string, where []Where, related RelatedQuery, opts *QueryOptions) ([]map[string]any, error) {
+	a.pages++
+	return a.RelatedDatabaseAdapter.FindRelated(ctx, table, column, where, related, opts)
+}
+func TestFindRelatedWithOptions_BoundedCallsAndUnsupportedAdapter(t *testing.T) {
+	l := newTestLimen(t)
+	for i := 0; i < 100; i++ {
+		seedUser(t, l, fmt.Sprintf("related-%03d@test.com", i))
+	}
+	original := l.core.db
+	spy := &relatedCountingAdapter{DatabaseAdapter: original, RelatedDatabaseAdapter: original.(RelatedDatabaseAdapter)}
+	l.core.db = spy
+	schema := l.core.Schema.User
+	relation := RelatedRecords{Schema: schema, Field: schema.GetIDField()}
+	for _, limit := range []int{1, 2, 100} {
+		spy.counts = 0
+		spy.pages = 0
+		page, err := l.core.FindRelatedWithOptions(t.Context(), schema, nil, relation, &QueryOptions{Limit: limit})
+		require.NoError(t, err)
+		require.Len(t, page.Items, limit)
+		require.EqualValues(t, 100, page.Total)
+		require.Equal(t, 1, spy.counts)
+		require.Equal(t, 1, spy.pages)
+	}
+	// Hiding the capability must fail, never discard the relation or load all users.
+	l.core.db = struct{ DatabaseAdapter }{original}
+	_, err := l.core.FindRelatedWithOptions(t.Context(), schema, nil, relation, &QueryOptions{Limit: 1})
+	require.ErrorContains(t, err, "does not support related queries")
 }

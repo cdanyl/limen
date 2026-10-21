@@ -10,6 +10,9 @@ import (
 type API interface {
 	CreateOrganization(ctx context.Context, user *limen.User, req *CreateOrganizationRequest) (*Organization, error)
 	GetOrganization(ctx context.Context, organizationID any) (*Organization, error)
+	// ListAccountMemberships returns only this user's memberships, paginated in
+	// organization order with organizations and roles loaded in bounded groups.
+	ListAccountMemberships(ctx context.Context, user *limen.User, filter *ListOrganizationsFilter, opts *limen.QueryOptions) (*limen.Page[*Member], error)
 	ListOrganizations(ctx context.Context, user *limen.User, filter *ListOrganizationsFilter, opts *limen.QueryOptions) (*limen.Page[*Organization], error)
 	UpdateOrganization(ctx context.Context, user *limen.User, organizationID any, req *UpdateOrganizationRequest) (*Organization, error)
 	DeleteOrganization(ctx context.Context, user *limen.User, organizationID any) error

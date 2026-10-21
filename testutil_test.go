@@ -116,3 +116,24 @@ func (p *testPlugin) RegisterRoutes(httpCore *LimenHTTPCore, routeBuilder *Route
 func (p *testPlugin) TestMethodOnPlugin() string {
 	return "test-method-on-plugin"
 }
+
+func TestMemoryAdapterStringAliases(t *testing.T) {
+	type state string
+	adapter := newTestMemoryAdapter(t)
+	_, err := adapter.Create(t.Context(), "alias_items", map[string]any{"status": state("pending")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := adapter.FindOne(t.Context(), "alias_items", nil, nil)
+	if err != nil || row["status"] != "pending" {
+		t.Fatalf("driver string normalization missing: %v", err)
+	}
+	_, err = adapter.Update(t.Context(), "alias_items", nil, map[string]any{"status": state("canceled")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err = adapter.FindOne(t.Context(), "alias_items", nil, nil)
+	if err != nil || row["status"] != "canceled" {
+		t.Fatalf("driver update normalization missing: %v", err)
+	}
+}

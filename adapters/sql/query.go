@@ -73,6 +73,10 @@ func (a *Adapter) FindOne(ctx context.Context, tableName limen.SchemaTableName, 
 
 func (a *Adapter) FindMany(ctx context.Context, tableName limen.SchemaTableName, conditions []limen.Where, options *limen.QueryOptions) ([]map[string]any, error) {
 	whereSQL, args := a.buildWhere(conditions)
+	return a.findMany(ctx, tableName, whereSQL, args, options)
+}
+
+func (a *Adapter) findMany(ctx context.Context, tableName limen.SchemaTableName, whereSQL string, args []any, options *limen.QueryOptions) ([]map[string]any, error) {
 	query := "SELECT * FROM " + a.quoteIdent(string(tableName))
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
@@ -198,6 +202,10 @@ func (a *Adapter) Exists(ctx context.Context, tableName limen.SchemaTableName, c
 
 func (a *Adapter) Count(ctx context.Context, tableName limen.SchemaTableName, conditions []limen.Where) (int64, error) {
 	whereSQL, args := a.buildWhere(conditions)
+	return a.count(ctx, tableName, whereSQL, args)
+}
+
+func (a *Adapter) count(ctx context.Context, tableName limen.SchemaTableName, whereSQL string, args []any) (int64, error) {
 	query := "SELECT COUNT(*) FROM " + a.quoteIdent(string(tableName))
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
@@ -207,4 +215,37 @@ func (a *Adapter) Count(ctx context.Context, tableName limen.SchemaTableName, co
 	var n int64
 	err := a.getQueryer().QueryRowContext(ctx, query, args...).Scan(&n)
 	return n, err
+}
+
+func (a *Adapter) relatedWhere(column string, conditions []limen.Where, related limen.RelatedQuery) (string, []any, error) {
+	if column == "" || related.Table == "" || related.Column == "" {
+		return "", nil, fmt.Errorf("related identifiers are required")
+	}
+	where, args := a.buildWhere(conditions)
+	relation, relationArgs := a.buildWhere(related.Conditions)
+	selectSQL := "SELECT " + a.quoteIdent(related.Column) + " FROM " + a.quoteIdent(string(related.Table))
+	if relation != "" {
+		selectSQL += " WHERE " + relation
+	}
+	predicate := a.quoteIdent(column) + " IN (" + selectSQL + ")"
+	if where != "" {
+		predicate = "(" + where + ") AND " + predicate
+	}
+	return predicate, append(args, relationArgs...), nil
+}
+
+func (a *Adapter) FindRelated(ctx context.Context, table limen.SchemaTableName, column string, conditions []limen.Where, related limen.RelatedQuery, options *limen.QueryOptions) ([]map[string]any, error) {
+	where, args, err := a.relatedWhere(column, conditions, related)
+	if err != nil {
+		return nil, err
+	}
+	return a.findMany(ctx, table, where, args, options)
+}
+
+func (a *Adapter) CountRelated(ctx context.Context, table limen.SchemaTableName, column string, conditions []limen.Where, related limen.RelatedQuery) (int64, error) {
+	where, args, err := a.relatedWhere(column, conditions, related)
+	if err != nil {
+		return 0, err
+	}
+	return a.count(ctx, table, where, args)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -242,4 +243,47 @@ func (a *Adapter) formatError(err error) error {
 		return limen.ErrRecordNotFound
 	}
 	return err
+}
+
+func (a *Adapter) relatedQuery(ctx context.Context, table limen.SchemaTableName, column string, conditions []limen.Where, related limen.RelatedQuery) (*gorm.DB, error) {
+	if column == "" || related.Table == "" || related.Column == "" {
+		return nil, fmt.Errorf("related identifiers are required")
+	}
+	db := a.getDB().WithContext(ctx)
+	var selected strings.Builder
+	db.QuoteTo(&selected, related.Column)
+	subquery := a.applyConditions(db.Table(string(related.Table)), related.Conditions).Select(selected.String())
+	query := a.applyConditions(db.Table(string(table)), conditions)
+	return query.Where(clause.Expr{SQL: "? IN (?)", Vars: []any{clause.Column{Name: column}, subquery}}), nil
+}
+
+func (a *Adapter) FindRelated(ctx context.Context, table limen.SchemaTableName, column string, conditions []limen.Where, related limen.RelatedQuery, options *limen.QueryOptions) ([]map[string]any, error) {
+	query, err := a.relatedQuery(ctx, table, column, conditions, related)
+	if err != nil {
+		return nil, err
+	}
+	if options != nil {
+		if options.Limit > 0 {
+			query = query.Limit(options.Limit)
+		}
+		if options.Offset > 0 {
+			query = query.Offset(options.Offset)
+		}
+		for _, order := range options.OrderBy {
+			query = query.Order(clause.OrderByColumn{Column: clause.Column{Name: order.Column}, Desc: order.Direction == limen.OrderByDesc})
+		}
+	}
+	var rows []map[string]any
+	err = query.Find(&rows).Error
+	return rows, a.formatError(err)
+}
+
+func (a *Adapter) CountRelated(ctx context.Context, table limen.SchemaTableName, column string, conditions []limen.Where, related limen.RelatedQuery) (int64, error) {
+	query, err := a.relatedQuery(ctx, table, column, conditions, related)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	err = query.Count(&total).Error
+	return total, a.formatError(err)
 }

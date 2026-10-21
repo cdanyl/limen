@@ -244,3 +244,27 @@ func TestGorm_Transaction_Rollback(t *testing.T) {
 	_, err = adapter.FindOne(ctx, "test_items", []limen.Where{limen.Eq("name", "Rolled")}, nil)
 	assert.ErrorIs(t, err, limen.ErrRecordNotFound)
 }
+
+func TestRelatedPageAndCount(t *testing.T) {
+	adapter := setupTestGormDB(t)
+	ctx := context.Background()
+	// Count and page must use the same bound relation filter.
+	for _, item := range []map[string]any{{"name": "relation-first", "email": "safe", "age": 11}, {"name": "relation-second", "email": "safe", "age": 12}, {"name": "unrelated", "email": "foreign", "age": 13}} {
+		_, err := adapter.Create(ctx, "test_items", item)
+		require.NoError(t, err)
+	}
+	relation := limen.RelatedQuery{Table: "test_items", Column: "id", Conditions: []limen.Where{limen.Eq("email", "safe")}}
+	total, err := adapter.CountRelated(ctx, "test_items", "id", nil, relation)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	rows, err := adapter.FindRelated(ctx, "test_items", "id", nil, relation, &limen.QueryOptions{Limit: 1, Offset: 1, OrderBy: []limen.OrderBy{{Column: "age", Direction: limen.OrderByAsc}}})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "relation-second", rows[0]["name"])
+	relation.Conditions = []limen.Where{limen.Eq("email", "safe' OR 1=1 --")}
+	total, err = adapter.CountRelated(ctx, "test_items", "id", nil, relation)
+	require.NoError(t, err)
+	require.Zero(t, total)
+	_, err = adapter.FindRelated(ctx, "test_items", "", nil, relation, nil)
+	require.Error(t, err)
+}
