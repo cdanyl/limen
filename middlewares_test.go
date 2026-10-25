@@ -1,6 +1,7 @@
 package limen
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -180,6 +181,65 @@ func TestMiddlewareCSRFProtection(t *testing.T) {
 			handler.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestMiddlewareRequireSession_StorageFailure(t *testing.T) {
+	t.Parallel()
+	l := newTestLimen(t)
+	userID := seedUser(t, l, "storage-failure@example.test")
+	session := seedSession(t, l, userID, "storage-failure@example.test")
+	manager := typedSessionManager(t, l)
+	store := manager.store
+	manager.store = sessionReadFailure{SessionStore: store, err: errors.New("private database connection details")}
+	handler := l.Handler()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/me", http.NoBody)
+	request.AddCookie(session.Cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusInternalServerError, response.Code)
+	assert.NotContains(t, response.Body.String(), "private database connection details")
+	assert.Nil(t, findCookie(response, "limen_session"), "a storage outage must not clear the session cookie")
+
+	manager.store = store
+	recovered := httptest.NewRecorder()
+	handler.ServeHTTP(recovered, request)
+	assert.Equal(t, http.StatusOK, recovered.Code, "the same session must work when storage recovers")
+}
+
+func TestMiddlewareRequireSession_AuthenticationErrors(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		cause       error
+		status      int
+		clearCookie bool
+	}{
+		{"missing", ErrSessionNotFound, http.StatusUnauthorized, true},
+		{"expired", ErrSessionExpired, http.StatusUnauthorized, true},
+		{"invalid", ErrSessionInvalid, http.StatusUnauthorized, true},
+		{"plugin-rejection", NewLimenError("invalid token", http.StatusUnauthorized, nil), http.StatusUnauthorized, true},
+		{"plugin-refresh-required", NewLimenError("refresh required", http.StatusConflict, nil), http.StatusConflict, false},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			l := newTestLimen(t)
+			manager := typedSessionManager(t, l)
+			manager.store = sessionReadFailure{SessionStore: manager.store, err: item.cause}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/me", http.NoBody)
+			request.AddCookie(&http.Cookie{Name: "limen_session", Value: "existing-session"})
+			response := httptest.NewRecorder()
+			l.Handler().ServeHTTP(response, request)
+			assert.Equal(t, item.status, response.Code)
+			cookie := findCookie(response, "limen_session")
+			if item.clearCookie {
+				if assert.NotNil(t, cookie) {
+					assert.Negative(t, cookie.MaxAge)
+				}
+			} else {
+				assert.Nil(t, cookie)
+			}
 		})
 	}
 }

@@ -2,6 +2,8 @@ package limen
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -233,4 +235,79 @@ func TestResolveSessionPolicy_NormalSession(t *testing.T) {
 
 	policy := sm.resolveSessionPolicy(normalSession)
 	assert.Equal(t, 24*time.Hour, policy.UpdateAge)
+}
+
+// sessionReadFailure preserves the real store for every operation except reads.
+type sessionReadFailure struct {
+	SessionStore
+	err error
+}
+
+func (store sessionReadFailure) Get(context.Context, string) (*Session, error) {
+	return nil, store.err
+}
+
+type cacheReadFailure struct {
+	CacheAdapter
+	err error
+}
+
+func (cache cacheReadFailure) Get(context.Context, string) ([]byte, error) {
+	return nil, cache.err
+}
+
+func TestOpaqueSessionManager_StorageErrors(t *testing.T) {
+	t.Parallel()
+	unavailable := errors.New("session backend unavailable")
+	for _, cause := range []error{unavailable, context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			l := newTestLimen(t)
+			manager := typedSessionManager(t, l)
+			manager.store = sessionReadFailure{SessionStore: manager.store, err: fmt.Errorf("read: %w", cause)}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/me", http.NoBody)
+			request.AddCookie(&http.Cookie{Name: "limen_session", Value: "existing-session"})
+			session, err := l.GetSession(request)
+			assert.Nil(t, session)
+			assert.ErrorIs(t, err, cause)
+			assert.NotErrorIs(t, err, ErrSessionNotFound)
+		})
+	}
+}
+
+func TestCacheSessionStore_ReadErrors(t *testing.T) {
+	t.Parallel()
+	unavailable := errors.New("cache backend unavailable")
+	for _, cause := range []error{ErrRecordNotFound, unavailable, context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			l := newTestLimen(t)
+			store := newSecondarySessionStore(l.core)
+			store.cache = cacheReadFailure{CacheAdapter: store.cache, err: fmt.Errorf("read: %w", cause)}
+			session, err := store.Get(t.Context(), "existing-session")
+			assert.Nil(t, session)
+			if errors.Is(cause, ErrRecordNotFound) {
+				assert.ErrorIs(t, err, ErrSessionNotFound)
+			} else {
+				assert.ErrorIs(t, err, cause)
+				assert.NotErrorIs(t, err, ErrSessionNotFound)
+			}
+		})
+	}
+}
+
+func TestOpaqueSessionManager_MissingUser(t *testing.T) {
+	t.Parallel()
+	l := newTestLimen(t)
+	manager := typedSessionManager(t, l)
+	now := time.Now()
+	require.NoError(t, manager.store.Set(t.Context(), &Session{
+		Token: "orphaned-session", UserID: "missing-user", CreatedAt: now,
+		LastAccess: now, ExpiresAt: now.Add(time.Hour),
+	}))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/me", http.NoBody)
+	request.AddCookie(&http.Cookie{Name: "limen_session", Value: "orphaned-session"})
+	_, err := l.GetSession(request)
+	assert.ErrorIs(t, err, ErrSessionInvalid)
+	response := httptest.NewRecorder()
+	l.Handler().ServeHTTP(response, request)
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
 }

@@ -2,6 +2,7 @@ package limen
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -24,8 +25,16 @@ func (httpCore *LimenHTTPCore) MiddlewareRequireSession() Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := httpCore.authInstance.GetSession(r)
 			if err != nil {
-				httpCore.core.Cookies().DeleteSessionCookie(w)
-				httpCore.Responder.Error(w, r, NewLimenError(err.Error(), http.StatusUnauthorized, nil))
+				failure := ToLimenError(err)
+				if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrSessionInvalid) {
+					failure = NewLimenError(err.Error(), http.StatusUnauthorized, nil)
+				}
+				if failure.Status() == http.StatusUnauthorized {
+					httpCore.core.Cookies().DeleteSessionCookie(w)
+				} else if failure.Status() >= http.StatusInternalServerError {
+					failure = NewLimenError(http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError, err)
+				}
+				httpCore.Responder.Error(w, r, failure)
 				return
 			}
 

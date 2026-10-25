@@ -2,6 +2,7 @@ package limen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -82,8 +83,11 @@ func (m *opaqueSessionManager) ValidateSession(ctx context.Context, request *htt
 	}
 
 	session, err := m.store.Get(ctx, token)
-	if err != nil {
+	if errors.Is(err, ErrRecordNotFound) {
 		return nil, ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	policy := m.resolveSessionPolicy(session)
@@ -100,6 +104,9 @@ func (m *opaqueSessionManager) ValidateSession(ctx context.Context, request *htt
 	}
 
 	user, err := m.core.DBAction.FindUserByID(ctx, session.UserID)
+	if errors.Is(err, ErrRecordNotFound) {
+		return nil, ErrSessionInvalid
+	}
 	if err != nil {
 		return nil, err
 	}

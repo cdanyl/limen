@@ -88,8 +88,11 @@ func (s *cacheSessionStore) loadSessionOrEmpty(ctx context.Context, token string
 
 func (s *cacheSessionStore) loadSession(ctx context.Context, token string) (map[string]any, error) {
 	data, err := s.cache.Get(ctx, s.sessionKey(token))
-	if err != nil {
+	if errors.Is(err, ErrRecordNotFound) {
 		return nil, ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	var stored map[string]any
